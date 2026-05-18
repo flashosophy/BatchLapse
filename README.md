@@ -5,6 +5,12 @@ timelapse-style exports.
 
 ![BatchLapse screenshot](sc.webp)
 
+## Use Cases
+
+- Post short timelapse videos on X.
+- Create animated GIFs that work well in GitHub READMEs, issues, and pull requests.
+- Make a quick speed-up effect without opening a full video editor.
+
 ## GitHub GIF Example
 
 This is a 15-second GitHub GIF export from BatchLapse:
