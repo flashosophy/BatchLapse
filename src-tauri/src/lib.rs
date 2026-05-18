@@ -20,6 +20,7 @@ const VIDEO_EXTENSIONS: &[&str] = &[
     "mp4", "mov", "m4v", "mkv", "avi", "webm", "wmv", "flv", "mpeg", "mpg", "ts", "mts", "m2ts",
 ];
 const GITHUB_GIF_MAX_SECONDS: f64 = 30.0;
+const OUTPUT_RESOLUTIONS: &[u32] = &[720, 1080, 1440];
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -39,6 +40,8 @@ struct RuntimeStatus {
 struct VideoInfo {
     path: String,
     duration_seconds: Option<f64>,
+    width: Option<u32>,
+    height: Option<u32>,
     has_audio: bool,
     error: Option<String>,
 }
@@ -52,6 +55,7 @@ struct SpeedOptions {
     strip_audio: bool,
     replace_existing: bool,
     output_format: String,
+    output_resolution: u32,
     output_dir: String,
     ffmpeg_dir: String,
 }
@@ -341,18 +345,50 @@ fn ffprobe_has_audio(ffprobe: &Path, path: &Path) -> bool {
     matches!(command.output(), Ok(output) if output.status.success() && !output.stdout.is_empty())
 }
 
+fn ffprobe_resolution(ffprobe: &Path, path: &Path) -> Option<(u32, u32)> {
+    let mut command = Command::new(ffprobe);
+    command.args([
+        "-v",
+        "error",
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "csv=s=x:p=0",
+    ]);
+    command.arg(path);
+    hide_command_window(&mut command);
+    let output = command.output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let text = String::from_utf8_lossy(&output.stdout);
+    let mut parts = text.trim().split('x');
+    let width = parts.next()?.parse::<u32>().ok()?;
+    let height = parts.next()?.parse::<u32>().ok()?;
+    Some((width, height))
+}
+
 fn probe_video_with(ffprobe: &Path, path: &str) -> VideoInfo {
     let video_path = PathBuf::from(path);
     match ffprobe_duration(ffprobe, &video_path) {
-        Ok(duration) => VideoInfo {
-            path: path.to_string(),
-            duration_seconds: Some(duration),
-            has_audio: ffprobe_has_audio(ffprobe, &video_path),
-            error: None,
-        },
+        Ok(duration) => {
+            let resolution = ffprobe_resolution(ffprobe, &video_path);
+            VideoInfo {
+                path: path.to_string(),
+                duration_seconds: Some(duration),
+                width: resolution.map(|(width, _)| width),
+                height: resolution.map(|(_, height)| height),
+                has_audio: ffprobe_has_audio(ffprobe, &video_path),
+                error: None,
+            }
+        }
         Err(error) => VideoInfo {
             path: path.to_string(),
             duration_seconds: None,
+            width: None,
+            height: None,
             has_audio: false,
             error: Some(error),
         },
@@ -452,9 +488,16 @@ fn parse_progress_line(line: &str, output_duration: f64) -> Option<f64> {
     Some((micros / 1_000_000.0 / output_duration * 100.0).clamp(0.0, 100.0))
 }
 
-fn github_gif_filter(speed: f64, width: u32, fps: u32) -> String {
+fn resolution_filter(output_resolution: u32) -> String {
     format!(
-        "[0:v:0]setpts=PTS/{speed:.8},fps={fps},scale=w='min({width}\\,iw)':h=-2:flags=lanczos,split[p0][p1];[p0]palettegen=stats_mode=diff[p];[p1][p]paletteuse=dither=bayer:bayer_scale=5"
+        "scale=w='if(gte(iw\\,ih)\\,-2\\,min({output_resolution}\\,iw))':h='if(gte(iw\\,ih)\\,min({output_resolution}\\,ih)\\,-2)':flags=lanczos"
+    )
+}
+
+fn github_gif_filter(speed: f64, output_resolution: u32, fps: u32) -> String {
+    format!(
+        "[0:v:0]setpts=PTS/{speed:.8},fps={fps},{},split[p0][p1];[p0]palettegen=stats_mode=diff[p];[p1][p]paletteuse=dither=bayer:bayer_scale=5",
+        resolution_filter(output_resolution)
     )
 }
 
@@ -538,6 +581,7 @@ fn run_ffmpeg_export(
     duration: f64,
     strip_audio: bool,
     output_format: &str,
+    output_resolution: u32,
 ) -> Result<(), String> {
     let output_duration = duration / speed;
     let github_gif = output_format.eq_ignore_ascii_case("github-gif");
@@ -557,7 +601,7 @@ fn run_ffmpeg_export(
             .args(["-hide_banner", "-nostdin", "-y", "-i"])
             .arg(input)
             .args(["-filter_complex"])
-            .arg(github_gif_filter(speed, 960, 15))
+            .arg(github_gif_filter(speed, output_resolution, 15))
             .args(["-loop", "0", "-an", "-progress", "pipe:1", "-nostats"])
             .arg(output)
             .stdout(Stdio::piped())
@@ -580,7 +624,10 @@ fn run_ffmpeg_export(
         .args(["-hide_banner", "-nostdin", "-y", "-i"])
         .arg(input)
         .args(["-map", "0:v:0", "-filter:v"])
-        .arg(format!("setpts=PTS/{speed:.8}"));
+        .arg(format!(
+            "setpts=PTS/{speed:.8},{}",
+            resolution_filter(output_resolution)
+        ));
 
     if webm_vp9 {
         command.args(["-c:v", "libvpx-vp9", "-crf", "32", "-b:v", "0"]);
@@ -732,6 +779,9 @@ fn start_speed_job(
     if !["mp4-h264", "webm-vp9", "github-gif"].contains(&options.output_format.as_str()) {
         return Err("Unsupported output format.".to_string());
     }
+    if !OUTPUT_RESOLUTIONS.contains(&options.output_resolution) {
+        return Err("Output resolution must be 720p, 1080p, or 1440p.".to_string());
+    }
     let ffmpeg = find_binary(&app, "ffmpeg", &options.ffmpeg_dir)
         .ok_or_else(|| missing_binary_message("ffmpeg", &options.ffmpeg_dir))?;
     let ffprobe = find_binary(&app, "ffprobe", &options.ffmpeg_dir)
@@ -790,6 +840,7 @@ fn start_speed_job(
                     duration,
                     options.strip_audio,
                     &options.output_format,
+                    options.output_resolution,
                 )?;
                 Ok((output, speed))
             })();

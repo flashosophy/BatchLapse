@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type QueueStatus = "pending" | "running" | "done" | "error" | "canceled";
 type OutputFormat = "mp4-h264" | "webm-vp9" | "github-gif";
+type OutputResolution = 720 | 1080 | 1440;
 
 type RuntimeStatus = {
   ffmpegFound: boolean;
@@ -34,6 +35,8 @@ type RuntimeStatus = {
 type VideoInfo = {
   path: string;
   durationSeconds: number | null;
+  width: number | null;
+  height: number | null;
   hasAudio: boolean;
   error: string | null;
 };
@@ -45,6 +48,7 @@ type SpeedOptions = {
   stripAudio: boolean;
   replaceExisting: boolean;
   outputFormat: OutputFormat;
+  outputResolution: OutputResolution;
   outputDir: string;
   ffmpegDir: string;
   recursive: boolean;
@@ -54,6 +58,8 @@ type QueueItem = {
   path: string;
   status: QueueStatus;
   durationSeconds?: number | null;
+  width?: number | null;
+  height?: number | null;
   hasAudio?: boolean;
   progress?: number;
   output?: string;
@@ -80,6 +86,7 @@ type WorkerEvent = {
 const SETTINGS_STORAGE_KEY = "batchlapse.settings.v1";
 const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "mkv", "avi", "webm", "wmv", "flv", "mpeg", "mpg", "ts", "mts", "m2ts"];
 const OUTPUT_FORMAT_OPTIONS: OutputFormat[] = ["mp4-h264", "webm-vp9", "github-gif"];
+const OUTPUT_RESOLUTION_OPTIONS: OutputResolution[] = [720, 1080, 1440];
 const GITHUB_GIF_MAX_SECONDS = 30;
 
 const defaultOptions: SpeedOptions = {
@@ -89,6 +96,7 @@ const defaultOptions: SpeedOptions = {
   stripAudio: true,
   replaceExisting: false,
   outputFormat: "mp4-h264",
+  outputResolution: 720,
   outputDir: "",
   ffmpegDir: "",
   recursive: true
@@ -111,6 +119,10 @@ function coerceChoice<T extends string>(value: unknown, choices: T[], fallback: 
   return typeof value === "string" && choices.includes(value as T) ? (value as T) : fallback;
 }
 
+function coerceResolution(value: unknown, fallback: OutputResolution) {
+  return OUTPUT_RESOLUTION_OPTIONS.includes(value as OutputResolution) ? (value as OutputResolution) : fallback;
+}
+
 function loadSavedOptions(): SpeedOptions {
   if (typeof window === "undefined") return defaultOptions;
   try {
@@ -124,6 +136,7 @@ function loadSavedOptions(): SpeedOptions {
       stripAudio: coerceBoolean(parsed.stripAudio, defaultOptions.stripAudio),
       replaceExisting: coerceBoolean(parsed.replaceExisting, defaultOptions.replaceExisting),
       outputFormat: coerceChoice(parsed.outputFormat, OUTPUT_FORMAT_OPTIONS, defaultOptions.outputFormat),
+      outputResolution: coerceResolution(parsed.outputResolution, defaultOptions.outputResolution),
       outputDir: typeof parsed.outputDir === "string" ? parsed.outputDir : "",
       ffmpegDir: typeof parsed.ffmpegDir === "string" ? parsed.ffmpegDir : defaultOptions.ffmpegDir,
       recursive: coerceBoolean(parsed.recursive, defaultOptions.recursive)
@@ -144,6 +157,11 @@ function formatDuration(seconds?: number | null) {
     return `${hours}:${String(mins).padStart(2, "0")}:${String(remainder).padStart(2, "0")}`;
   }
   return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function formatResolution(width?: number | null, height?: number | null) {
+  if (!width || !height) return "--";
+  return `${width}x${height}`;
 }
 
 function compactPath(path: string) {
@@ -235,6 +253,8 @@ function App() {
               ? {
                   ...item,
                   durationSeconds: info.durationSeconds,
+                  width: info.width,
+                  height: info.height,
                   hasAudio: info.hasAudio,
                   message: info.error ?? item.message
                 }
@@ -478,6 +498,7 @@ function App() {
           stripAudio: options.stripAudio,
           replaceExisting: options.replaceExisting,
           outputFormat: options.outputFormat,
+          outputResolution: options.outputResolution,
           outputDir: options.outputDir,
           ffmpegDir: options.ffmpegDir
         }
@@ -596,9 +617,27 @@ function App() {
 
             {options.outputFormat === "github-gif" ? (
               <div className="format-options">
-                <small>GitHub GIF uploads are limited to 10 MB. BatchLapse caps GitHub GIF exports at 30 seconds using 15 fps and up to 960px width.</small>
+                <small>GitHub GIF uploads are limited to 10 MB. BatchLapse caps GitHub GIF exports at 30 seconds using 15 fps and the selected output resolution.</small>
               </div>
             ) : null}
+
+            <label className="field">
+              <span>Output resolution</span>
+              <select
+                value={options.outputResolution}
+                onChange={(event) =>
+                  setOptions((current) => ({
+                    ...current,
+                    outputResolution: Number(event.target.value) as OutputResolution
+                  }))
+                }
+              >
+                <option value="720">720p</option>
+                <option value="1080">1080p</option>
+                <option value="1440">1440p</option>
+              </select>
+              <small>Preserves aspect ratio and does not upscale smaller videos.</small>
+            </label>
 
             <label className="toggle">
               <input
@@ -765,6 +804,7 @@ function App() {
             <div className="queue-header">
               <span>Input</span>
               <span>Duration</span>
+              <span>Source res</span>
               <span>Speed</span>
               <span>Status</span>
               <span>Output</span>
@@ -782,6 +822,7 @@ function App() {
                     <small>{item.path}</small>
                   </div>
                   <div>{formatDuration(item.durationSeconds)}</div>
+                  <div>{formatResolution(item.width, item.height)}</div>
                   <div>{item.speed ? `${item.speed.toFixed(2)}x` : projectedSpeed(item)}</div>
                   <div className="status">
                     {statusIcon(item.status)}

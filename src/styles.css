@@ -393,7 +393,7 @@ button:disabled {
 .queue-header,
 .queue-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1.4fr) 100px 90px minmax(180px, 0.8fr) minmax(260px, 1fr);
+  grid-template-columns: minmax(240px, 1.35fr) 90px 95px 80px minmax(170px, 0.8fr) minmax(240px, 1fr);
   gap: 16px;
   align-items: center;
   padding: 13px 16px;
