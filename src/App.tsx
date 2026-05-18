@@ -45,7 +45,6 @@ type SpeedOptions = {
   stripAudio: boolean;
   replaceExisting: boolean;
   outputFormat: OutputFormat;
-  githubGifMaxMb: number;
   outputDir: string;
   ffmpegDir: string;
   recursive: boolean;
@@ -81,6 +80,7 @@ type WorkerEvent = {
 const SETTINGS_STORAGE_KEY = "batchlapse.settings.v1";
 const VIDEO_EXTENSIONS = ["mp4", "mov", "m4v", "mkv", "avi", "webm", "wmv", "flv", "mpeg", "mpg", "ts", "mts", "m2ts"];
 const OUTPUT_FORMAT_OPTIONS: OutputFormat[] = ["mp4-h264", "webm-vp9", "github-gif"];
+const GITHUB_GIF_MAX_SECONDS = 30;
 
 const defaultOptions: SpeedOptions = {
   multiplier: 2,
@@ -89,7 +89,6 @@ const defaultOptions: SpeedOptions = {
   stripAudio: true,
   replaceExisting: false,
   outputFormat: "mp4-h264",
-  githubGifMaxMb: 9,
   outputDir: "",
   ffmpegDir: "",
   recursive: true
@@ -125,7 +124,6 @@ function loadSavedOptions(): SpeedOptions {
       stripAudio: coerceBoolean(parsed.stripAudio, defaultOptions.stripAudio),
       replaceExisting: coerceBoolean(parsed.replaceExisting, defaultOptions.replaceExisting),
       outputFormat: coerceChoice(parsed.outputFormat, OUTPUT_FORMAT_OPTIONS, defaultOptions.outputFormat),
-      githubGifMaxMb: coerceNumber(parsed.githubGifMaxMb, defaultOptions.githubGifMaxMb, 1, 9),
       outputDir: typeof parsed.outputDir === "string" ? parsed.outputDir : "",
       ffmpegDir: typeof parsed.ffmpegDir === "string" ? parsed.ffmpegDir : defaultOptions.ffmpegDir,
       recursive: coerceBoolean(parsed.recursive, defaultOptions.recursive)
@@ -480,7 +478,6 @@ function App() {
           stripAudio: options.stripAudio,
           replaceExisting: options.replaceExisting,
           outputFormat: options.outputFormat,
-          githubGifMaxMb: options.githubGifMaxMb,
           outputDir: options.outputDir,
           ffmpegDir: options.ffmpegDir
         }
@@ -579,9 +576,17 @@ function App() {
               <span>Output format</span>
               <select
                 value={options.outputFormat}
-                onChange={(event) =>
-                  setOptions((current) => ({ ...current, outputFormat: event.target.value as OutputFormat }))
-                }
+                onChange={(event) => {
+                  const outputFormat = event.target.value as OutputFormat;
+                  setOptions((current) => ({
+                    ...current,
+                    outputFormat,
+                    targetSeconds:
+                      outputFormat === "github-gif"
+                        ? Math.min(current.targetSeconds, GITHUB_GIF_MAX_SECONDS)
+                        : current.targetSeconds
+                  }));
+                }}
               >
                 <option value="mp4-h264">MP4 (H.264)</option>
                 <option value="webm-vp9">WebM (VP9)</option>
@@ -591,23 +596,7 @@ function App() {
 
             {options.outputFormat === "github-gif" ? (
               <div className="format-options">
-                <div className="range-field">
-                  <div className="range-labels">
-                    <span>GitHub GIF size target</span>
-                    <strong>{options.githubGifMaxMb.toFixed(0)} MB</strong>
-                  </div>
-                  <input
-                    type="range"
-                    min="1"
-                    max="9"
-                    step="1"
-                    value={options.githubGifMaxMb}
-                    onChange={(event) =>
-                      setOptions((current) => ({ ...current, githubGifMaxMb: Number(event.target.value) }))
-                    }
-                  />
-                </div>
-                <small>GitHub GIF uploads are limited to 10 MB. BatchLapse leaves a margin and may reduce GIF size or frame rate to fit.</small>
+                <small>GitHub GIF uploads are limited to 10 MB. BatchLapse caps GitHub GIF exports at 30 seconds using 15 fps and up to 960px width.</small>
               </div>
             ) : null}
 
@@ -628,14 +617,19 @@ function App() {
                 <input
                   type="number"
                   min="0.1"
+                  max={options.outputFormat === "github-gif" ? GITHUB_GIF_MAX_SECONDS : undefined}
                   step="0.1"
                   value={options.targetSeconds}
-                  onChange={(event) =>
+                  onChange={(event) => {
+                    const maxSeconds = options.outputFormat === "github-gif" ? GITHUB_GIF_MAX_SECONDS : 86400;
                     setOptions((current) => ({
                       ...current,
-                      targetSeconds: Math.max(0.1, Number(event.target.value) || current.targetSeconds)
-                    }))
-                  }
+                      targetSeconds: Math.min(
+                        maxSeconds,
+                        Math.max(0.1, Number(event.target.value) || current.targetSeconds)
+                      )
+                    }));
+                  }}
                 />
               </label>
             ) : null}

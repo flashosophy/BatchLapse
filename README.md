@@ -5,6 +5,12 @@ timelapse-style exports.
 
 ![BatchLapse screenshot](sc.webp)
 
+## GitHub GIF Example
+
+This is a 15-second GitHub GIF export from BatchLapse:
+
+![15-second BatchLapse GitHub GIF example](animGIF.gif)
+
 ## What It Does
 
 - Drag and drop one video, many videos, or folders.
@@ -17,7 +23,8 @@ timelapse-style exports.
 - GitHub GIF exports use 15 fps, loop forever, scale down to 960px wide when
   needed, and do not include audio.
 - GitHub limits GIF uploads in issues and pull requests to 10 MB. BatchLapse
-  includes a 1-9 MB GIF size target so exports leave room under that limit.
+  caps GitHub GIF exports at 30 seconds because that is close to the upload
+  limit with this profile.
 - Output folder field with same-folder output as the default.
 - Per-file queue status, progress, output path, and open-output-folder button.
 - Existing exports are numbered automatically unless Replace existing exports is enabled.
